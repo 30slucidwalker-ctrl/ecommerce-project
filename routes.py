@@ -6,7 +6,7 @@ from models import User
 from models import Product, ProductImage
 from google.auth.transport import requests as google_requests
 from decorators import admin_required
-from validators import validate_product_query_params, validate_product_creation_body
+from validators import validate_product_query_params, validate_product_creation_body, validate_product_update_body
 from utils import generate_unique_slug
 
 # Initialize the routing blueprint clipboard
@@ -631,4 +631,104 @@ def admin_get_product(id):
                 "position": img.position
             } for img in sorted(product.images, key=lambda i: i.position)
         ]
+    }), 200
+
+
+@api_bp.route("/admin/products/<id>", methods=["PATCH"])
+@admin_required()
+def update_product(id):
+    """
+    5.4 Update product details (admin partial edit)
+    Updates only provided keys and re-evaluates unique constraints (Page 6).
+    """
+    # 1. Locate product
+    product = db.session.scalars(db.select(Product).filter_by(id=id)).first()
+    if not product:
+        return jsonify({"error": "Product not found."}), 404
+
+    # 2. Extract and validate request fields
+    params, error_response = validate_product_update_body()
+    if error_response:
+        return error_response
+
+    # 3. Dynamic partial update mapping
+    if "name" in params:
+        product.name = params["name"]
+        # Automatically update URL slug and handle database collisions
+        product.slug = generate_unique_slug(params["name"], exclude_product_id=product.id)
+
+    if "description" in params:
+        product.description = params["description"]
+
+    if "sku" in params:
+        # Check uniqueness against other database records to prevent collisions
+        sku_collision = db.session.scalars(
+            db.select(Product).filter(Product.sku == params["sku"], Product.id != product.id)
+        ).first()
+        if sku_collision:
+            return jsonify({
+                "error": {
+                    "code": "DUPLICATE_SKU",
+                    "message": f"Product with SKU '{params['sku']}' already exists."
+                }
+            }), 409  # 🌟 Cheat Sheet: 409 for Duplicate SKU
+        product.sku = params["sku"]
+
+    if "price_cents" in params:
+        product.price_cents = params["price_cents"]
+
+    if "category_id" in params:
+        product.category_id = params["category_id"]
+
+    if "is_active" in params:
+        product.is_active = params["is_active"]
+
+    # 4. Process image array replacement if present
+    if "images" in params:
+        # Completely clear old child imagery to execute an atomic sync write
+        db.session.execute(db.delete(ProductImage).where(ProductImage.product_id == product.id))
+
+        for idx, img_item in enumerate(params["images"]):
+            position = img_item["position"] if img_item["position"] is not None else idx
+            new_image = ProductImage(
+                product=product,
+                url=img_item["url"],
+                alt_text=img_item["alt_text"] or f"{product.name} image {idx + 1}",
+                position=int(position)
+            )
+            db.session.add(new_image)
+
+    # 5. Commit mutations to SQLite (Bumps updated_at automatically via ORM hook)
+    db.session.commit()
+
+    # 6. Return successful 200 payload mapping full administrative model details
+    return jsonify({
+        "status": "success",
+        "message": "Product configurations updated successfully.",
+        "product": {
+            "id": str(product.id),
+            "name": product.name,
+            "slug": product.slug,
+            "sku": product.sku,
+            "description": product.description,
+            "price_cents": product.price_cents,
+            "currency": product.currency,
+            "stock_quantity": product.stock_quantity,
+            "is_active": product.is_active,
+            "created_at": product.created_at.isoformat(),
+            "updated_at": product.updated_at.isoformat(),
+            "category": {
+                "id": product.category_id,
+                "name": product.category_id.replace("-", " ").title(),
+                "slug": product.category_id.lower()
+            },
+            "images": [
+                {
+                    "id": str(img.id),
+                    "url": img.url,
+                    "alt_text": img.alt_text,
+                    "position": img.position
+                } for img in sorted(product.images, key=lambda i: i.position)
+            ]
+        }
     }), 200

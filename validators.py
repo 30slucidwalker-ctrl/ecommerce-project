@@ -225,3 +225,123 @@ def validate_product_creation_body():
         "is_active": is_active,
         "images": images
     }, None
+
+def validate_product_update_body():
+    """
+    Validates optional request payload fields for a partial update (PATCH).
+    Tracks field-level error messages and returns a structured 422 payload.
+    """
+    data = request.get_json(silent=True) or request.form
+    if not data:
+        return None, (jsonify({"error": "Missing or invalid request body."}), 400)
+
+    validation_errors = []
+    cleaned_data = {}
+
+    # 1. Partial 'name' Validation
+    if "name" in data:
+        name = data.get("name")
+        if not name or not str(name).strip():
+            validation_errors.append({"field": "name", "message": "Field cannot be empty if provided."})
+        elif len(str(name)) < 2 or len(str(name)) > 160:
+            validation_errors.append({"field": "name", "message": "Must be between 2 and 160 characters."})
+        else:
+            cleaned_data["name"] = str(name).strip()
+
+    # 2. Partial 'description' Validation
+    if "description" in data:
+        description = data.get("description")
+        if description is not None and len(str(description)) > 5000:
+            validation_errors.append({"field": "description", "message": "Cannot exceed 5000 characters."})
+        else:
+            cleaned_data["description"] = str(description).strip() if description else None
+
+    # 3. Partial 'sku' Validation
+    if "sku" in data:
+        sku = data.get("sku")
+        if not sku or not str(sku).strip():
+            validation_errors.append({"field": "sku", "message": "Field cannot be empty if provided."})
+        elif len(str(sku)) < 1 or len(str(sku)) > 64:
+            validation_errors.append({"field": "sku", "message": "Must be between 1 and 64 characters."})
+        elif " " in str(sku):
+            validation_errors.append({"field": "sku", "message": "Cannot contain whitespace spaces."})
+        else:
+            cleaned_data["sku"] = str(sku).strip().upper()
+
+    # 4. Partial 'price_cents' Validation
+    if "price_cents" in data:
+        price_cents_raw = data.get("price_cents")
+        try:
+            if isinstance(price_cents_raw, bool):
+                raise ValueError
+            cleaned_price = str(price_cents_raw).replace(",", "").strip()
+            price_cents = int(cleaned_price)
+            if price_cents < 0:
+                validation_errors.append({"field": "price_cents", "message": "Must be an integer >= 0."})
+            else:
+                cleaned_data["price_cents"] = price_cents
+        except (ValueError, TypeError):
+            validation_errors.append({"field": "price_cents", "message": "Must be an integer >= 0."})
+
+    # 5. Partial 'category_id' Validation
+    if "category_id" in data:
+        category_id = data.get("category_id")
+        if not category_id or not str(category_id).strip():
+            validation_errors.append({"field": "category_id", "message": "Field cannot be empty if provided."})
+        else:
+            cleaned_data["category_id"] = str(category_id).strip()
+
+    # 6. Partial 'is_active' Validation
+    if "is_active" in data:
+        is_active_raw = data.get("is_active")
+        if isinstance(is_active_raw, str):
+            clean_str = is_active_raw.strip().lower()
+            if clean_str in ["true", "1"]:
+                cleaned_data["is_active"] = True
+            elif clean_str in ["false", "0"]:
+                cleaned_data["is_active"] = False
+            else:
+                validation_errors.append({"field": "is_active", "message": "Must be a valid boolean choice."})
+        elif isinstance(is_active_raw, bool):
+            cleaned_data["is_active"] = is_active_raw
+        elif isinstance(is_active_raw, int) and is_active_raw in[0, 1]:
+            cleaned_data["is_active"] = bool(is_active_raw)
+        else:
+            validation_errors.append({"field": "is_active", "message": "Must be a valid boolean value."})
+
+    # 7. Partial 'images' Validation
+    if "images" in data:
+        raw_images = data.get("images", [])
+        images = []
+        if not isinstance(raw_images, list):
+            validation_errors.append({"field": "images", "message": "Must be a valid list object array."})
+        else:
+            for idx, img_item in enumerate(raw_images):
+                if not isinstance(img_item, dict):
+                    validation_errors.append({"field": f"images[{idx}]", "message": "Image properties must be an object."})
+                    continue
+                url = img_item.get("url")
+                if not url or not str(url).strip():
+                    validation_errors.append({"field": f"images[{idx}].url", "message": "Field is required for each image entry."})
+                elif len(str(url)) > 500:
+                    validation_errors.append({"field": f"images[{idx}].url", "message": "URL cannot exceed 500 characters."})
+                else:
+                    images.append({
+                        "url": str(url).strip(),
+                        "alt_text": str(img_item.get("alt_text", "")).strip() or None,
+                        "position": img_item.get("position")
+                    })
+            cleaned_data["images"] = images
+
+    # 8. Check for validation errors
+    if validation_errors:
+        error_payload = {
+            "error": {
+                "code": "VALIDATION_FAILED",
+                "message": "One or more fields are invalid.",
+                "details": validation_errors
+            }
+        }
+        return None, (jsonify(error_payload), 422)
+
+    return cleaned_data, None
