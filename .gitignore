@@ -4,5 +4,5 @@ __pycache__/
 .idea/
 instance/
 .env
-users.db
+instance/database.db
 migrations/

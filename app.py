@@ -3,6 +3,7 @@ from flask import Flask
 from extensions import db, migrate, jwt
 from routes import api_bp
 from dotenv import load_dotenv
+from datetime import timedelta
 
 # Load environment variables from .env file
 load_dotenv()
@@ -14,7 +15,8 @@ def create_app():
     # We now pull sensitive information from environment variables
     app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "dev-key-if-missing")
     app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "dev-jwt-key-if-missing")
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("SQLALCHEMY_DATABASE_URI", "sqlite:///users.db")
+    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("SQLALCHEMY_DATABASE_URI", "sqlite:///database.db")
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     
     # Dynamically build the list of allowed Google Client IDs from environment variables
